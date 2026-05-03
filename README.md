@@ -60,3 +60,8 @@ npm run dev
 - `POST /api/v1/auth/login`
 - `GET /api/v1/auth/profile` (protected)
 - `POST /api/v1/planner/generate` (protected)
+
+## MADE BY
+
+`SOHIT KUMAR`
+`03-may-2026`
