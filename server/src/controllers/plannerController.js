@@ -1,6 +1,8 @@
 import Journey from '../models/Journey.js';
 import RouteSegment from '../models/RouteSegment.js';
 import User from '../models/User.js';
+import https from 'https';
+import { sendEmail } from '../utils/emailUtil.js';
 
 const ALLOWED_PURPOSES = ['business', 'leisure', 'emergency', 'family trip'];
 const ALLOWED_PREFERENCES = ['fastest', 'cheapest', 'balanced'];
@@ -70,9 +72,52 @@ const toTitle = (value) =>
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ');
 
-const estimateDistance = (source, destination) => {
+const geocode = (query) => {
+  return new Promise((resolve) => {
+    const cleanQuery = query.replace(/NIT\s+|IIT\s+|IIIT\s+|Central\s+|Railway\s+|Station\s+|Airport\s+/ig, '').trim();
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cleanQuery)}`;
+    
+    https.get(url, { headers: { 'User-Agent': 'TravelWithoutTensionApp/1.0' } }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          if (result && result.length > 0) {
+            resolve({ lat: parseFloat(result[0].lat), lon: parseFloat(result[0].lon) });
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    }).on('error', () => resolve(null));
+  });
+};
+
+const haversine = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
+const estimateDistance = async (source, destination) => {
   const known = DISTANCE_KM[toKey(source, destination)];
   if (known) return known;
+
+  const loc1 = await geocode(source);
+  const loc2 = await geocode(destination);
+  
+  if (loc1 && loc2) {
+    const dist = haversine(loc1.lat, loc1.lon, loc2.lat, loc2.lon) * 1.3; // 1.3 routing factor for roads
+    return Math.max(10, Math.round(dist));
+  }
 
   const tokenCount = new Set(
     `${source} ${destination}`
@@ -139,10 +184,10 @@ const buildOption = ({ optionId, label, reason, convenienceScore, legs, traveler
   };
 };
 
-const buildMultimodalOptions = ({ source, destination, travelerCount }) => {
+const buildMultimodalOptions = async ({ source, destination, travelerCount }) => {
   const sourceName = toTitle(source);
   const destinationName = toTitle(destination);
-  const distance = estimateDistance(sourceName, destinationName);
+  const distance = await estimateDistance(sourceName, destinationName);
 
   const sourceHubs = getHubs(sourceName);
   const destHubs = getHubs(destinationName);
@@ -413,7 +458,7 @@ export const generateTripPlan = async (req, res) => {
       return res.status(400).json({ message: validationError });
     }
 
-    const generatedOptions = buildMultimodalOptions(payload);
+    const generatedOptions = await buildMultimodalOptions(payload);
     const rankedOptions = rankOptions({
       options: generatedOptions,
       preference: payload.preference,
@@ -508,6 +553,28 @@ export const bookJourney = async (req, res) => {
 
     const segments = await RouteSegment.insertMany(routeSegmentsData);
 
+    // Send booking confirmation email (non-blocking)
+    const user = await User.findById(req.user.userId);
+    if (user?.email) {
+      const legSummary = selectedOption.legs
+        .map((l, i) => `  ${i + 1}. ${l.mode}: ${l.from} → ${l.to} (${l.durationMins} mins, INR ${l.costPerPerson}/person)`)
+        .join('\n');
+
+      sendEmail({
+        email: user.email,
+        subject: `✅ Booking Confirmed: ${journey.bookingRef} | TWT`,
+        message: `Hi ${user.name},\n\nYour journey has been successfully booked!\n\n` +
+          `📋 Booking Reference: ${journey.bookingRef}\n` +
+          `🗺️  Route: ${journey.source} → ${journey.destination}\n` +
+          `📅 Date: ${journey.travelDate}\n` +
+          `👤 Travelers: ${journey.travelerCount}\n` +
+          `💰 Total Cost: INR ${selectedOption.totalCost}\n\n` +
+          `🚦 Journey Breakdown:\n${legSummary}\n\n` +
+          `You can track your journey live on the TWT platform.\n\n` +
+          `Safe travels!\nTravel Without Tension Team`
+      }).catch(err => console.error('Email send failed silently:', err));
+    }
+
     return res.status(200).json({
       message: 'Journey booked successfully.',
       bookingRef: journey.bookingRef,
@@ -518,6 +585,19 @@ export const bookJourney = async (req, res) => {
   } catch (error) {
     console.error('Book journey error:', error.message);
     return res.status(500).json({ message: 'Unable to complete booking right now.' });
+  }
+};
+
+export const getAllJourneys = async (req, res) => {
+  try {
+    const journeys = await Journey.find({ user: req.user.userId })
+      .sort({ createdAt: -1 })
+      .select('source destination travelDate status bookingRef selectedOptionId options createdAt travelerCount');
+
+    return res.status(200).json({ journeys });
+  } catch (error) {
+    console.error('Get all journeys error:', error.message);
+    return res.status(500).json({ message: 'Unable to fetch journeys.' });
   }
 };
 
@@ -539,6 +619,28 @@ export const getActiveJourney = async (req, res) => {
   } catch (error) {
     console.error('Get active journey error:', error.message);
     return res.status(500).json({ message: 'Unable to fetch active journey.' });
+  }
+};
+
+export const getJourneyById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const journey = await Journey.findOne({ _id: id, user: req.user.userId });
+    if (!journey) {
+      return res.status(404).json({ message: 'Journey not found.' });
+    }
+
+    const segments = await RouteSegment.find({ journeyId: journey._id }).sort({ sequenceIndex: 1 });
+    const user = await User.findById(req.user.userId);
+
+    return res.status(200).json({
+      journey,
+      segments,
+      walletBalance: user?.walletBalance || 0
+    });
+  } catch (error) {
+    console.error('Get journey by ID error:', error.message);
+    return res.status(500).json({ message: 'Unable to fetch journey.' });
   }
 };
 

@@ -1,28 +1,40 @@
 import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5002';
 
 function JourneyTrackerPage() {
+  const { journeyId } = useParams();
+  const navigate = useNavigate();
   const [journeyData, setJourneyData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notification, setNotification] = useState('');
 
-  const fetchActiveJourney = async () => {
+  const fetchJourney = async () => {
     try {
       const token = localStorage.getItem('authToken');
       if (!token) return;
 
-      const { data } = await axios.get(`${API_URL}/api/v1/planner/journeys/active`, {
+      let url;
+      if (journeyId) {
+        // Fetch a specific journey by ID
+        url = `${API_URL}/api/v1/planner/journeys/${journeyId}`;
+      } else {
+        // Fallback: most recent active journey
+        url = `${API_URL}/api/v1/planner/journeys/active`;
+      }
+
+      const { data } = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setJourneyData(data);
     } catch (err) {
-      if (err.response && err.response.status === 404) {
-        setError('No active journey found. Go plan a trip!');
+      if (err.response?.status === 404) {
+        setError('Journey not found. Go plan a trip!');
       } else {
-        setError('Failed to load active journey.');
+        setError('Failed to load journey details.');
       }
     } finally {
       setLoading(false);
@@ -30,8 +42,9 @@ function JourneyTrackerPage() {
   };
 
   useEffect(() => {
-    fetchActiveJourney();
-  }, []);
+    fetchJourney();
+  }, [journeyId]);
+
 
   const showNotification = (msg) => {
     if (!msg) return;
@@ -51,22 +64,33 @@ function JourneyTrackerPage() {
       if (data.notification) {
         showNotification(data.notification);
       }
-      fetchActiveJourney();
+      fetchJourney();
     } catch (err) {
       alert(err.response?.data?.message || 'Simulation failed');
     }
   };
 
   if (loading) {
-    return <div className="app-shell"><p>Loading tracker...</p></div>;
+    return (
+      <div className="app-shell">
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '4rem' }}>
+          <p style={{ color: 'var(--text-secondary)' }}>Loading tracker...</p>
+        </div>
+      </div>
+    );
   }
 
   if (error || !journeyData) {
     return (
       <div className="app-shell">
         <div className="card" style={{ maxWidth: '600px', margin: '2rem auto', textAlign: 'center' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🗺️</div>
           <h2>Journey Tracker</h2>
-          <p>{error}</p>
+          <p style={{ color: 'var(--text-secondary)' }}>{error}</p>
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '1.5rem' }}>
+            <button onClick={() => navigate('/dashboard')} style={{ background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}>View Dashboard</button>
+            <button onClick={() => navigate('/trip-planner')}>Plan a Trip</button>
+          </div>
         </div>
       </div>
     );
@@ -92,9 +116,15 @@ function JourneyTrackerPage() {
 
         <div className="planner-header" style={{ display: 'flex', justifyContent: 'space-between' }}>
           <div>
-            <h3>Live Tracker</h3>
-            <p>Booking Ref: <strong>{journey.bookingRef}</strong></p>
-            <p>Route: {journey.source} &rarr; {journey.destination}</p>
+            <button
+              onClick={() => navigate('/dashboard')}
+              style={{ marginBottom: '0.75rem', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-secondary)', padding: '0.35rem 0.85rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem' }}
+            >
+              ← Back to Dashboard
+            </button>
+            <h3 style={{ margin: 0 }}>Live Tracker</h3>
+            <p style={{ margin: '0.25rem 0 0' }}>Booking Ref: <strong>{journey.bookingRef}</strong></p>
+            <p style={{ margin: '0.25rem 0 0' }}>Route: {journey.source} &rarr; {journey.destination}</p>
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ background: 'var(--surface-color)', padding: '0.5rem 1rem', borderRadius: '4px', border: '1px solid var(--border-color)', marginBottom: '1rem', display: 'inline-block' }}>
@@ -102,7 +132,32 @@ function JourneyTrackerPage() {
             </div>
             <br />
             {!isJourneyComplete && (
-              <button onClick={() => showNotification('Live location link generated and sent to Emergency Contacts.')} style={{ background: 'var(--accent-color)', color: '#fff', fontSize: '0.8rem', padding: '0.5rem 1rem' }}>
+              <button
+                onClick={async () => {
+                  if (!navigator.geolocation) {
+                    showNotification('Geolocation is not supported by your browser.');
+                    return;
+                  }
+                  navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                      const { latitude, longitude } = pos.coords;
+                      const mapsUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
+                      // Copy to clipboard
+                      navigator.clipboard.writeText(mapsUrl).then(() => {
+                        showNotification(`📍 Location link copied! Share it: ${mapsUrl}`);
+                      }).catch(() => {
+                        showNotification(`📍 Your location: ${mapsUrl}`);
+                      });
+                    },
+                    (err) => {
+                      if (err.code === 1) showNotification('⚠️ Location permission denied. Please allow access in your browser settings.');
+                      else showNotification('⚠️ Unable to get location. Please try again.');
+                    },
+                    { enableHighAccuracy: true, timeout: 10000 }
+                  );
+                }}
+                style={{ background: 'var(--accent-color)', color: '#fff', fontSize: '0.8rem', padding: '0.5rem 1rem' }}
+              >
                 📍 Share Live Location
               </button>
             )}

@@ -5,6 +5,7 @@ import connectDB from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
 import plannerRoutes from './routes/plannerRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
 
 dotenv.config();
 
@@ -24,6 +25,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/planner', plannerRoutes);
 app.use('/api/v1/chat', chatRoutes);
+app.use('/api/v1/payment', paymentRoutes);
 
 const server = app.listen(port, host, () => {
   console.log(`Server running at http://${host}:${port}`);

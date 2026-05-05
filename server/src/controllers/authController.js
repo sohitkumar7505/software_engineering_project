@@ -1,6 +1,8 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import Otp from '../models/Otp.js';
+import { sendEmail } from '../utils/emailUtil.js';
 
 const createToken = (userId) =>
   jwt.sign({ userId }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '7d' });
@@ -15,18 +17,66 @@ const validatePassword = (password) => {
   return password && password.length >= 6;
 };
 
+export const sendOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email is required.' });
+    }
+
+    if (!validateEmail(email)) {
+      return res.status(400).json({ message: 'Please provide a valid email address.' });
+    }
+
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(409).json({ message: 'An account with this email already exists.' });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Remove any existing OTP for this email
+    await Otp.deleteMany({ email: email.toLowerCase() });
+
+    // Save new OTP
+    await Otp.create({
+      email: email.toLowerCase(),
+      otp
+    });
+
+    // Send Email
+    const message = `Your OTP for Travel Without Tension signup is: ${otp}. It will expire in 5 minutes.`;
+    await sendEmail({
+      email: email.toLowerCase(),
+      subject: 'Your Signup OTP',
+      message
+    });
+
+    // For dev console, also log it
+    console.log(`OTP for ${email}: ${otp}`);
+
+    return res.status(200).json({ message: 'OTP sent successfully.' });
+  } catch (error) {
+    console.error('Send OTP error:', error);
+    return res.status(500).json({ message: 'Unable to send OTP. Please try again.' });
+  }
+};
+
 export const signup = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, otp } = req.body;
 
     // Comprehensive validation
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !otp) {
       return res.status(400).json({
-        message: 'Name, email, and password are required.',
+        message: 'Name, email, password, and OTP are required.',
         errors: {
           name: !name ? 'Name is required' : null,
           email: !email ? 'Email is required' : null,
-          password: !password ? 'Password is required' : null
+          password: !password ? 'Password is required' : null,
+          otp: !otp ? 'OTP is required' : null
         }
       });
     }
@@ -48,6 +98,16 @@ export const signup = async (req, res) => {
       return res.status(409).json({ message: 'An account with this email already exists.' });
     }
 
+    // Verify OTP
+    const otpRecord = await Otp.findOne({ email: email.toLowerCase() });
+    if (!otpRecord) {
+      return res.status(400).json({ message: 'OTP has expired or not been requested.' });
+    }
+
+    if (otpRecord.otp !== otp) {
+      return res.status(400).json({ message: 'Invalid OTP.' });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 12); // Increased rounds for better security
 
     const user = await User.create({
@@ -56,11 +116,11 @@ export const signup = async (req, res) => {
       password: hashedPassword
     });
 
-    const token = createToken(user._id);
+    // Delete used OTP
+    await Otp.deleteOne({ _id: otpRecord._id });
 
     return res.status(201).json({
       message: 'Account created successfully.',
-      token,
       user: {
         id: user._id,
         name: user.name,

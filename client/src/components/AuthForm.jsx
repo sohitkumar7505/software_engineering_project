@@ -4,12 +4,14 @@ import { useAuth } from '../contexts/AuthContext';
 
 function AuthForm({ mode, onAuthSuccess }) {
   const isSignup = mode === 'signup';
-  const { login, signup } = useAuth();
+  const { login, signup, sendOtp } = useAuth();
 
+  const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    password: ''
+    password: '',
+    otp: ''
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -28,20 +30,28 @@ function AuthForm({ mode, onAuthSuccess }) {
   const validateForm = () => {
     const errors = {};
 
-    if (isSignup && !formData.name.trim()) {
-      errors.name = 'Name is required';
+    if (step === 1) {
+      if (isSignup && !formData.name.trim()) {
+        errors.name = 'Name is required';
+      }
+
+      if (!formData.email.trim()) {
+        errors.email = 'Email is required';
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+        errors.email = 'Please enter a valid email';
+      }
+
+      if (!formData.password) {
+        errors.password = 'Password is required';
+      } else if (formData.password.length < 6) {
+        errors.password = 'Password must be at least 6 characters';
+      }
     }
 
-    if (!formData.email.trim()) {
-      errors.email = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      errors.email = 'Please enter a valid email';
-    }
-
-    if (!formData.password) {
-      errors.password = 'Password is required';
-    } else if (formData.password.length < 6) {
-      errors.password = 'Password must be at least 6 characters';
+    if (isSignup && step === 2) {
+      if (!formData.otp.trim()) {
+        errors.otp = 'OTP is required';
+      }
     }
 
     setValidationErrors(errors);
@@ -56,8 +66,20 @@ function AuthForm({ mode, onAuthSuccess }) {
     setError('');
     setMessage('');
 
+    if (isSignup && step === 1) {
+      const result = await sendOtp(formData.email);
+      setLoading(false);
+      if (result.success) {
+        setStep(2);
+        setMessage('OTP sent to your email. Please check your inbox.');
+      } else {
+        setError(result.error || 'Failed to send OTP.');
+      }
+      return;
+    }
+
     const result = isSignup
-      ? await signup(formData.name, formData.email, formData.password)
+      ? await signup(formData.name, formData.email, formData.password, formData.otp)
       : await login(formData.email, formData.password);
 
     setLoading(false);
@@ -67,9 +89,9 @@ function AuthForm({ mode, onAuthSuccess }) {
       return;
     }
 
-    setMessage(isSignup ? 'Signup successful.' : 'Login successful.');
+    setMessage(isSignup ? 'Signup successful. Redirecting to login...' : 'Login successful.');
     if (onAuthSuccess) {
-      onAuthSuccess(result.user);
+      onAuthSuccess(result.user, isSignup);
     }
   };
 
@@ -111,49 +133,66 @@ function AuthForm({ mode, onAuthSuccess }) {
         <p>{isSignup ? 'Sign up and start planning smart journeys.' : 'Login and continue your journey planning.'}</p>
 
         <form onSubmit={handleSubmit} className="form-grid">
-          {isSignup && (
+          {isSignup && step === 2 ? (
             <label>
-              Full Name
+              Enter OTP
               <input
                 type="text"
-                name="name"
-                value={formData.name}
+                name="otp"
+                value={formData.otp}
                 onChange={handleChange}
-                placeholder="Sohit Kumar"
-                className={validationErrors.name ? 'error' : ''}
+                placeholder="6-digit OTP"
+                className={validationErrors.otp ? 'error' : ''}
               />
-              {validationErrors.name && <span className="field-error">{validationErrors.name}</span>}
+              {validationErrors.otp && <span className="field-error">{validationErrors.otp}</span>}
             </label>
+          ) : (
+            <>
+              {isSignup && (
+                <label>
+                  Full Name
+                  <input
+                    type="text"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleChange}
+                    placeholder="Sohit Kumar"
+                    className={validationErrors.name ? 'error' : ''}
+                  />
+                  {validationErrors.name && <span className="field-error">{validationErrors.name}</span>}
+                </label>
+              )}
+
+              <label>
+                Email
+                <input
+                  type="email"
+                  name="email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  placeholder="you@example.com"
+                  className={validationErrors.email ? 'error' : ''}
+                />
+                {validationErrors.email && <span className="field-error">{validationErrors.email}</span>}
+              </label>
+
+              <label>
+                Password
+                <input
+                  type="password"
+                  name="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="At least 6 characters"
+                  className={validationErrors.password ? 'error' : ''}
+                />
+                {validationErrors.password && <span className="field-error">{validationErrors.password}</span>}
+              </label>
+            </>
           )}
 
-          <label>
-            Email
-            <input
-              type="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              placeholder="you@example.com"
-              className={validationErrors.email ? 'error' : ''}
-            />
-            {validationErrors.email && <span className="field-error">{validationErrors.email}</span>}
-          </label>
-
-          <label>
-            Password
-            <input
-              type="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              placeholder="At least 6 characters"
-              className={validationErrors.password ? 'error' : ''}
-            />
-            {validationErrors.password && <span className="field-error">{validationErrors.password}</span>}
-          </label>
-
           <button type="submit" disabled={loading}>
-            {loading ? 'Please wait...' : isSignup ? 'Create Account' : 'Login'}
+            {loading ? 'Please wait...' : (isSignup && step === 1 ? 'Continue' : isSignup ? 'Create Account' : 'Login')}
           </button>
         </form>
 

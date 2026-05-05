@@ -5,6 +5,7 @@ import SignupPage from './pages/SignupPage';
 import TripPlannerPage from './pages/TripPlannerPage';
 import BookingOptionsPage from './pages/BookingOptionsPage';
 import JourneyTrackerPage from './pages/JourneyTrackerPage';
+import DashboardPage from './pages/DashboardPage';
 
 function AppContent() {
   const { user, loading, logout } = useAuth();
@@ -29,6 +30,7 @@ function AppContent() {
           ) : (
             <>
               <span className="welcome-text">Hello, {user.name}</span>
+              <Link to="/dashboard">Dashboard</Link>
               <Link to="/trip-planner">Trip Planner</Link>
               <Link to="/tracker">Live Tracker</Link>
               <button onClick={logout} className="logout-btn">Logout</button>
@@ -39,11 +41,13 @@ function AppContent() {
 
       <main>
         <Routes>
-          <Route path="/" element={<Navigate to={user ? '/trip-planner' : '/signup'} replace />} />
-          <Route path="/signup" element={!user ? <SignupPage /> : <Navigate to="/trip-planner" replace />} />
-          <Route path="/login" element={!user ? <LoginPage /> : <Navigate to="/trip-planner" replace />} />
+          <Route path="/" element={<Navigate to={user ? '/dashboard' : '/signup'} replace />} />
+          <Route path="/signup" element={!user ? <SignupPage /> : <Navigate to="/dashboard" replace />} />
+          <Route path="/login" element={!user ? <LoginPage /> : <Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={user ? <DashboardPage /> : <Navigate to="/login" replace />} />
           <Route path="/trip-planner" element={user ? <TripPlannerPage /> : <Navigate to="/login" replace />} />
           <Route path="/book/:journeyId/:optionId" element={user ? <BookingOptionsPage /> : <Navigate to="/login" replace />} />
+          <Route path="/tracker/:journeyId" element={user ? <JourneyTrackerPage /> : <Navigate to="/login" replace />} />
           <Route path="/tracker" element={user ? <JourneyTrackerPage /> : <Navigate to="/login" replace />} />
           <Route path="/search-journey" element={<Navigate to="/trip-planner" replace />} />
         </Routes>

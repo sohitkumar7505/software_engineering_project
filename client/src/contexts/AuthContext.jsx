@@ -49,20 +49,25 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const signup = async (name, email, password) => {
+  const sendOtp = async (email) => {
+    try {
+      const { data } = await axios.post(`${API_URL}/api/v1/auth/send-otp`, { email });
+      return { success: true, message: data.message };
+    } catch (error) {
+      return { success: false, error: error.response?.data?.message || 'Failed to send OTP' };
+    }
+  };
+
+  const signup = async (name, email, password, otp) => {
     try {
       const { data } = await axios.post(`${API_URL}/api/v1/auth/signup`, {
         name,
         email,
-        password
+        password,
+        otp
       });
 
-      setToken(data.token);
-      setUser(data.user);
-      localStorage.setItem('authToken', data.token);
-      localStorage.setItem('userData', JSON.stringify(data.user));
-      axios.defaults.headers.common.Authorization = `Bearer ${data.token}`;
-
+      // Do NOT log the user in automatically, return success so they can be redirected to login
       return { success: true, user: data.user };
     } catch (error) {
       return { success: false, error: error.response?.data?.message || 'Signup failed' };
@@ -98,6 +103,7 @@ export const AuthProvider = ({ children }) => {
         token,
         loading,
         login,
+        sendOtp,
         signup,
         logout,
         refreshProfile,
